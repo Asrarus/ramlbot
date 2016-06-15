@@ -74,6 +74,11 @@ Robot.toquery = function(obj, prefix) {
   }
   return str.join("&");
 }
+Robot.runner = function (script, options) {
+	for (var i = 0; i < options.spawnCount; i++) {
+		(new Robot(script, options)).run();
+	}
+}
 
 
 Robot.prototype.log = function () {
