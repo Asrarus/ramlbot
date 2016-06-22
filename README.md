@@ -1,9 +1,10 @@
 # ramlbot
 scriptable bot generated from raml
 
-## setup modules
+## setup env
 ```
 npm install raml-client-generator -g
+npm install node-gyp -g
 npm install --save https://github.com/umegaya/ramlbot.git
 npm install --save popsicle
 ```
@@ -39,7 +40,9 @@ touch index.js
 cat index.js
 var Robot = require('ramlbot');
 
-(new Robot('./scripts.js', {
+Robot.runner('./script.js', {
+	spawnCount: 100,
+	loop: 3,
 	API: require('./api'),
 	baseUri: "http://api.example.com/v1/",
 	respParser: JSON.parse,
@@ -47,8 +50,7 @@ var Robot = require('ramlbot');
 	headers: {
 		'Content-Type': 'application/json',
 	},
-	loop: 1,
-})).run();
+});
 ```
 
 ## run it

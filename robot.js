@@ -58,6 +58,7 @@ function Robot(script, options) {
 	this.options = options;
 	this.apiCache = {};
 	this.finished = false;
+	this.codec = options.codecFactory ? options.codecFactory() : {}
 	this.userdata = {}
 }
 
@@ -125,7 +126,7 @@ Robot.prototype.call = function (path, data) {
 		promise = api.get(null, this.reqopts());
 	}
 	else if (api.post) {
-		data = (this.options.reqUnparser ? this.options.reqUnparser : JSON.stringify)(data);
+		data = (this.codec.encode || JSON.stringify)(data);
 		//console.log("body:" + data);
 		promise = api.post(data, this.reqopts())
 	}
@@ -133,9 +134,7 @@ Robot.prototype.call = function (path, data) {
 		throw "invalid api " + path;
 	}
 	promise.then(function (res) {
-		if (self.options.respParser) {
-			res.body = self.options.respParser(res.body);
-		}
+		res.body = (self.codec.decode || JSON.parse)(res.body);
 		if (self.options.throwNon200 && res.statusCode != 200) {
 			self.fiber.throwInto("http error:" + res.statusCode);
 		}
