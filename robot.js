@@ -3,6 +3,7 @@ var _eval = require('eval');
 var fs = require('fs');
 var http = require('http'), https = require('https');
 var URL = require('url');
+var assign = require('object-assign');
 var Promise = require('any-promise');
 
 module.exports = Robot;
@@ -98,10 +99,10 @@ Robot.prototype.run = function () {
 	this.fiber.run(this);
 }
 
-Robot.prototype.reqopts = function () {
+Robot.prototype.reqopts = function (headers) {
 	//TODO: add some header
 	return {
-		headers: this.options.headers,
+		headers: assign(headers || {}, this.options.headers),
 		baseUri: this.options.baseUri,
 	}
 }
@@ -122,19 +123,20 @@ Robot.prototype.call = function (path, data) {
 		this.apiCache[path] = api;
 	}
 	var promise;
+	var headers = assign({}, this.options.headers);
 	if (api.get) {
-		promise = api.get(null, this.reqopts());
+		promise = api.get(null, this.reqopts(headers));
 	}
 	else if (api.post) {
-		data = (this.codec.encode || JSON.stringify)(data);
+		data = (this.codec.encode || JSON.stringify)(data, headers, this.userdata);
 		//console.log("body:" + data);
-		promise = api.post(data, this.reqopts())
+		promise = api.post(data, this.reqopts(headers));
 	}
 	else {
 		throw "invalid api " + path;
 	}
 	promise.then(function (res) {
-		res.body = (self.codec.decode || JSON.parse)(res.body);
+		res.body = (self.codec.decode || JSON.parse)(res.body, res.headers, this.userdata);
 		if (self.options.throwNon200 && res.statusCode != 200) {
 			self.fiber.throwInto("http error:" + res.statusCode);
 		}

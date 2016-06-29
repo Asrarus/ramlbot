@@ -45,8 +45,12 @@ Robot.runner('./script.js', {
 	loop: 3,
 	API: require('./api'),
 	baseUri: "http://api.example.com/v1/",
-	respParser: JSON.parse,
-	reqUnparser: JSON.stringify,
+	codecFactory: function () {
+		return {
+			decode: JSON.parse,
+			encode: JSON.stringify,
+		}
+	},
 	headers: {
 		'Content-Type': 'application/json',
 	},
@@ -57,3 +61,7 @@ Robot.runner('./script.js', {
 ```
 node index.js
 ```
+
+## advanced. 
+1. custom payload codec 
+2. custom payload codec: modify/use header
