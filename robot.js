@@ -39,11 +39,27 @@ var requester = function (options) {
 	return p;
 }
 
+function serialize(obj, prefix) {
+  var str = [];
+  for(var p in obj) {
+    if (obj.hasOwnProperty(p)) {
+      var k = prefix ? prefix + "[" + p + "]" : p, v = obj[p];
+      str.push(typeof v == "object" ?
+        serialize(v, k) :
+        encodeURIComponent(k) + "=" + encodeURIComponent(v));
+    }
+  }
+  return str.join("&");	
+}
+
 function Robot(script, options) {
 	var code = 'module.exports = function (client) {' + 
-		'for (var __count__ = 0; __count__ < ' + (options.loop || 1) + '; __count__++) {\n' + 
-			fs.readFileSync(script, { encoding: 'UTF-8' }) + '\n' + 
-		'}\n' +
+		'try {\n' + 
+			'for (var __count__ = 0; __count__ < ' + (options.loop || 1) + '; __count__++) {\n' + 
+				fs.readFileSync(script, { encoding: 'UTF-8' }) + '\n' + 
+			'}\n' +
+			'client.options.resolve(client, null);\n' + 
+		'} catch (e) { client.options.resolve(client, e); throw e; };\n' + 
 		'client.finished = true;' +  
 	'};';
 	//console.log("code = " + code);
@@ -57,6 +73,13 @@ function Robot(script, options) {
 	this.api = new options.API();
 	this.fiber = Fiber(_eval(code));
 	this.options = options;
+	this.options.resolve = this.options.resolve || function (cl, err) {
+		if (!err) {
+			cl.log("running success");
+		} else {
+			cl.log("robot running error:" + err.message);
+		}
+	}
 	this.apiCache = {};
 	this.finished = false;
 	this.codec = options.codecFactory ? options.codecFactory() : {}
@@ -64,17 +87,8 @@ function Robot(script, options) {
 }
 
 Robot.idseed = 1;
-Robot.toquery = function(obj, prefix) {
-  var str = [];
-  for(var p in obj) {
-    if (obj.hasOwnProperty(p)) {
-      var k = prefix ? prefix + "[" + p + "]" : p, v = obj[p];
-      str.push(typeof v == "object" ?
-        serialize(v, k) :
-        encodeURIComponent(k) + "=" + encodeURIComponent(v));
-    }
-  }
-  return str.join("&");
+Robot.toquery = function(obj) {
+	return serialize(obj);
 }
 Robot.runner = function (script, options) {
 	for (var i = 0; i < options.spawnCount; i++) {
@@ -95,8 +109,12 @@ Robot.prototype.log = function () {
 	console.log("rb" + this.id + ":" + arguments[0] + params);
 }
 
-Robot.prototype.run = function () {
-	this.fiber.run(this);
+Robot.prototype.run = function (arg) {
+	try {
+		this.fiber.run(arg || this);
+	} catch (e) {
+		console.warn("run robot error:" + e);
+	}
 }
 
 Robot.prototype.reqopts = function (headers) {
@@ -136,11 +154,17 @@ Robot.prototype.call = function (path, data) {
 		throw "invalid api " + path;
 	}
 	promise.then(function (res) {
-		res.body = (self.codec.decode || JSON.parse)(res.body, res.headers, this.userdata);
 		if (self.options.throwNon200 && res.statusCode != 200) {
-			self.fiber.throwInto("http error:" + res.statusCode);
+			self.fiber.throwInto(new Error("http error:" + res.statusCode));
 		}
-		self.fiber.run(res);
+		try {
+			res.body = (self.codec.decode || JSON.parse)(res.body, res.headers, this.userdata);
+			self.run(res);
+		} catch (e) {
+			self.fiber.throwInto(new Error("parse payload error:" + e.message + " for [" + res.body + "]"));
+		}
+	}).then(null, function (e) {
+		self.fiber.throwInto(e);
 	});
 	return Fiber.yield();
 }
@@ -148,7 +172,7 @@ Robot.prototype.call = function (path, data) {
 Robot.prototype.sleep = function (msec) {
 	var self = this;
 	setTimeout(function () {
-		self.fiber.run();
+		self.run();
 	}, msec);
 	Fiber.yield();
 }
