@@ -11,6 +11,9 @@ module.exports = Robot;
 var requester = function (options) {
 	var u = URL.parse(options.url);
 	var transport = (u.schema == 'http' ? http : https);
+	if (!options.headers['Content-Length'] && options.body) {
+		options.headers['Content-Length'] = options.body.length;
+	}
 	var p = new Promise(function (resolve, reject) {
 		var req = http.request({
 			hostname: u.hostname,
@@ -20,7 +23,12 @@ var requester = function (options) {
 			headers: options.headers,
 		}, function (res) {
 			res.on('data', function (d) {
-				res.body = (res.body || '') + d;
+				//console.log("ondata:" + d.toString('hex'));
+				if (!res.body) {
+					res.body = d;
+				} else {
+					res.body = Buffer.concat([res.body, d], res.body.length + d.length);
+				}
 			})
 			res.on('end', function () {
 				resolve(res);
@@ -77,13 +85,13 @@ function Robot(script, options) {
 		if (!err) {
 			cl.log("running success");
 		} else {
-			cl.log("robot running error:" + err.message);
+			cl.log("robot running error:" + err.stack);
 		}
 	}
 	this.apiCache = {};
 	this.finished = false;
-	this.codec = options.codecFactory ? options.codecFactory() : {}
-	this.userdata = {}
+	this.codec = options.codecFactory ? options.codecFactory() : {};
+	this.userdata = options.userdataFactory ? options.userdataFactory() : {};
 }
 
 Robot.idseed = 1;
@@ -159,6 +167,97 @@ Robot.prototype.call = function (path, data) {
 		}
 		try {
 			res.body = (self.codec.decode || JSON.parse)(res.body, res.headers, this.userdata);
+			self.run(res);
+		} catch (e) {
+			self.fiber.throwInto(new Error("parse payload error:" + e.message + " for [" + res.body + "]"));
+		}
+	}).then(null, function (e) {
+		self.fiber.throwInto(e);
+	});
+	return Fiber.yield();
+}
+
+Robot.prototype.sleep = function (msec) {
+	var self = this;
+	setTimeout(function () {
+		self.run();
+	}, msec);
+	Fiber.yield();
+}
+
+Robot.idseed = 1;
+Robot.toquery = function(obj) {
+	return serialize(obj);
+}
+Robot.runner = function (script, options) {
+	for (var i = 0; i < options.spawnCount; i++) {
+		(new Robot(script, options)).run();
+	}
+}
+
+
+Robot.prototype.log = function () {
+	var params = ""
+	if (arguments.length <= 0) {
+		return;
+	}
+	if (arguments.length > 1) {
+		var ps = Array.prototype.slice.call(arguments, 1);
+		params = " " + JSON.stringify(ps);
+	}
+	console.log("rb" + this.id + ":" + arguments[0] + params);
+}
+
+Robot.prototype.run = function (arg) {
+	try {
+		this.fiber.run(arg || this);
+	} catch (e) {
+		console.warn("run robot error:" + e);
+	}
+}
+
+Robot.prototype.reqopts = function (headers) {
+	//TODO: add some header
+	return {
+		headers: assign(headers || {}, this.options.headers),
+		baseUri: this.options.baseUri,
+	}
+}
+
+Robot.prototype.call = function (path, data) {
+	var self = this;
+	var api = self.apiCache[path];
+	if (!api) {
+		api = self.api.resources;
+		path.split('/').forEach(function (part) {
+			if (part) {
+				api = api[part];
+				if (!api) {
+					throw "no such api " + path;
+				}
+			}
+		});
+		self.apiCache[path] = api;
+	}
+	var promise;
+	var headers = assign({}, self.options.headers);
+	if (api.get) {
+		promise = api.get(null, self.reqopts(headers));
+	}
+	else if (api.post) {
+		data = (self.codec.encode || JSON.stringify)(data, api, headers, self.userdata);
+		//console.log("body:" + data);
+		promise = api.post(data, self.reqopts(headers));
+	}
+	else {
+		throw "invalid api " + path;
+	}
+	promise.then(function (res) {
+		if (self.options.throwNon200 && res.statusCode != 200) {
+			self.fiber.throwInto(new Error("http error:" + res.statusCode));
+		}
+		try {
+			res.body = (self.codec.decode || JSON.parse)(res.body, api, res.headers, self.userdata);
 			self.run(res);
 		} catch (e) {
 			self.fiber.throwInto(new Error("parse payload error:" + e.message + " for [" + res.body + "]"));
