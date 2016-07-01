@@ -3,6 +3,7 @@ var _eval = require('eval');
 var fs = require('fs');
 var http = require('http'), https = require('https');
 var URL = require('url');
+var crypto = require('crypto');
 var assign = require('object-assign');
 var Promise = require('any-promise');
 
@@ -117,6 +118,22 @@ Robot.prototype.log = function () {
 	console.log("rb" + this.id + ":" + arguments[0] + params);
 }
 
+Robot.prototype.randomBytes = function (len) {
+	return crypto.randomBytes(len);
+}
+
+Robot.prototype.hash = function (type, fmt, payload) {
+	var hash = crypto.createHash(type);
+    hash.update(payload);
+    return hash.digest(fmt);
+}
+
+Robot.prototype.assert = function (cond, msg) {
+	if (!cond) {
+		self.fiber.throwInto(new Error(msg));
+	}
+}
+
 Robot.prototype.run = function (arg) {
 	try {
 		this.fiber.run(arg || this);
@@ -140,7 +157,9 @@ Robot.prototype.call = function (path, data) {
 		api = self.api.resources;
 		path.split('/').forEach(function (part) {
 			if (part) {
-				api = api[part];
+				api = api[part.replace(/[-_](\w)/g, function (_, c) {
+					return c ? c.toUpperCase () : '';
+			    })];
 				if (!api) {
 					throw "no such api " + path;
 				}
@@ -151,6 +170,7 @@ Robot.prototype.call = function (path, data) {
 	var promise;
 	var headers = assign({}, self.options.headers);
 	if (api.get) {
+		self.codec.encode && self.codec.encode(null, api, headers, self.userdata);
 		promise = api.get(null, self.reqopts(headers));
 	}
 	else if (api.post) {
